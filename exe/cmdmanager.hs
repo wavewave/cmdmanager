@@ -10,7 +10,7 @@ import Control.Monad.Coroutine.EventHandler
 -- from this package 
 import WebLog
 import CmdExec
-
+import Type 
 
 -- |
 
@@ -27,6 +27,7 @@ second :: Int
 second = 1000000
 
 -- | 
+mycmd :: CmdSet
 mycmd = CmdSet "/home/wavewave/repo/workspace/haskellstudy/slow/slow 20"
                "/home/wavewave/repo/workspace/haskellstudy/slow"
 

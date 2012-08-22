@@ -34,9 +34,9 @@ Library
                    coroutine-object >= 0.0.999 && < 0.2
   Other-Modules:   
   exposed-modules:
-                   WebLog
                    CmdExec
-
+                   WebLog
+                   Type
 
 
  
