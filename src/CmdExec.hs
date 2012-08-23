@@ -1,5 +1,5 @@
 {-# LANGUAGE GADTs, NoMonomorphismRestriction, ScopedTypeVariables, 
-             KindSignatures, RecordWildCards #-}
+             KindSignatures, RecordWildCards, FlexibleContexts #-}
 
 ----------------------------
 -- | This module provides main object of cmd executor
@@ -16,7 +16,9 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.Map.Lens 
 import Data.Monoid
+import System.FilePath 
 import System.Directory 
+import System.IO
 import System.Process 
 -- from coroutine-object
 import Control.Monad.Coroutine
@@ -32,12 +34,26 @@ import Prelude hiding ((.),id)
 
 -- | 
 doCmdAction :: Int -> CmdSet -> (Event -> IO ()) -> IO ()
-doCmdAction i cmdset handler = do 
-    forkIO $ do setCurrentDirectory (workdir cmdset)
-                system (program cmdset)
+doCmdAction i cmdset@CmdSet {..}  handler = do 
+    forkIO $ do setCurrentDirectory workdir
+                -- system (program cmdset)
+                (_mhin,Just hout,_mherr,h) <- createProcess (shell program) { std_out = CreatePipe }  
+                str <- hGetContents hout 
+                writeFile (workdir </> stdoutfile ) str 
                 handler (eventWrap (Finish i))
     return ()
 
+-- fireEvent :: CmdExecEvent -> 
+-- | 
+fireEvent :: (MonadState (WorldAttrib m1) m, Eventable e) => e -> m ()
+fireEvent ev = modify (worldState.bufQueue %~ enqueue wrappedev)
+  where wrappedev = Right (eventWrap ev)
+
+-- | 
+fireAction :: (MonadState (WorldAttrib m1) m) => ((Event -> IO ()) -> IO ()) 
+           -> m ()
+fireAction action = modify (worldState.bufQueue %~ enqueue wrappedev)
+  where wrappedev = Left (ActionOrder action)
 
 -- | command executor actor
 cmdexec :: forall m. (Monad m) => 
@@ -55,8 +71,9 @@ cmdexec cmdset idnum = ReaderT (workerW idnum None)
           Init i' -> do 
             if i == i' 
               then do 
-                let action = Left . ActionOrder $ doCmdAction i cmdset 
-                modify (worldState.bufQueue %~ enqueue action)
+                -- let action = Left . ActionOrder $ doCmdAction i cmdset 
+                -- modify (worldState.bufQueue %~ enqueue action)
+                fireAction (doCmdAction i cmdset)
                 return (True,Started)
               else return (False,jst)
           Finish i' -> do
@@ -91,6 +108,7 @@ world = ReaderT staction
                          let wlst' = cmdexec cmdset i : wlst 
                          modify (worldActor.workers .~ wlst')
                          modify (worldState.nextID %~ (+1) )
+                         fireEvent (Init i)
                        _ -> do  
                          Right wlst' <- 
                            runErrorT $ mapM (\x -> liftM fst (x <==> giveEventSub e)) wlst
