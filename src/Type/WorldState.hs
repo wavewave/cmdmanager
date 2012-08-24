@@ -7,7 +7,7 @@
 -- 
 -------------------------------------------------
 
-module Type where 
+module Type.WorldState where 
 
 import Control.Applicative hiding (empty)
 import Control.Category
@@ -25,84 +25,21 @@ import Control.Monad.Coroutine.Event
 import Control.Monad.Coroutine.Object
 import Control.Monad.Coroutine.Queue
 -- 
+import Type.CmdSet 
+import Type.SubOp 
+-- 
 import Prelude hiding (id,(.))
 
 
 -- | 
-data SubOp i o where 
-  GiveEventSub :: SubOp CmdExecEvent ()
-
--- | info about command 
-data CmdSet = CmdSet { program :: String 
-                     , workdir :: FilePath 
-                     , stdoutfile :: FilePath 
-                     } 
-            deriving (Show,Eq)
-
--- | 
-data CmdExecEvent = Start CmdSet
-                  | Init Int 
-                  | Finish Int
-                  | Render 
-                    deriving (Show,Eq)
-
--- | 
-instance SafeCopy CmdSet where
-  putCopy CmdSet {..} = contain $ do safePut program 
-                                     safePut workdir 
-                                     safePut stdoutfile 
-  getCopy = contain $ CmdSet <$> safeGet <*> safeGet <*> safeGet                
-
-
--- | 
-instance SafeCopy CmdExecEvent where
-  putCopy (Start exec) = contain $ safePut (1 :: Int) >> safePut exec
-  putCopy (Init n) = contain $ safePut (2 :: Int) >> safePut n 
-  putCopy (Finish n) = contain $ safePut (3 :: Int) >> safePut n 
-  putCopy Render = contain $ safePut (4 :: Int)
-  getCopy = contain $ do (x :: Int) <- safeGet 
-                         case x of 
-                           1 -> Start <$> safeGet  
-                           2 -> Init <$> safeGet
-                           3 -> Finish <$> safeGet
-                           4 -> pure Render 
-                           _ -> error "failed in getCopy of CmdExecEvent"
-
-
-evuuid :: UUID
-evuuid = case (fromString "858066b5-e6e7-431d-9ff3-facc5eb0befc") of 
-           Nothing -> error "evuuid in CmdExec.hs" 
-           Just i -> i 
-
-evwrap :: CmdExecEvent -> Event 
-evwrap ev = Event (evuuid,runPut (safePut ev))
-
-
--- | 
-instance Eventable CmdExecEvent where
-  eventClassID _ = evuuid 
-  eventWrap = evwrap 
-
-getCmdExecEvent :: Event -> Maybe CmdExecEvent 
-getCmdExecEvent (Event (i,bstr))  
-    | i == evuuid = either (const Nothing) Just (runGet safeGet bstr)
-    | otherwise = Nothing 
-
--- |
-giveEventSub :: (Monad m) => CmdExecEvent -> ClientObj SubOp m () 
-giveEventSub ev = request (Input GiveEventSub ev) >> return ()
-
-
-
--- | 
-data JobStatus = None | Started | Ended 
+data JobStatus a = None | Assigned a | Started a | Ended a  
                deriving (Show,Eq)
 
 
 
 -- | full state of world 
 data WorldState = WorldState { _nextID :: Int 
-                             , _jobMap :: Map Int JobStatus
+                             , _jobMap :: Map Int (JobStatus CmdSet)
                              , _bufLog :: String -> String 
                              , _bufQueue :: Queue (Either ActionOrder Event) }
 
@@ -112,7 +49,7 @@ nextID = lens _nextID (\a b -> a { _nextID = b })
 
 
 -- | lens
-jobMap :: Simple Lens WorldState (Map Int JobStatus)
+jobMap :: Simple Lens WorldState (Map Int (JobStatus CmdSet))
 jobMap = lens _jobMap (\a b -> a { _jobMap = b })
 
 
@@ -172,3 +109,5 @@ worldActor = lens _worldActor (\a b -> a {_worldActor = b})
 -- | initialization   
 initWorld :: (Monad m) => WorldAttrib m 
 initWorld = WorldAttrib emptyWorldState initWorldActor
+
+

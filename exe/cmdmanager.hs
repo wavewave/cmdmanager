@@ -9,11 +9,15 @@ import System.FilePath
 import Control.Monad.Coroutine.Driver 
 import Control.Monad.Coroutine.Event 
 import Control.Monad.Coroutine.EventHandler 
+import Control.Monad.Coroutine.Logger.Simple 
 import HEP.Physics.MSSM.Model.MSUGRA
 -- from this package 
-import WebLog
-import CmdExec
-import Type 
+-- import WebLog
+-- import CmdExec
+import Type.CmdExec
+import Type.CmdExecEvent
+import Type.CmdSet
+import World 
 
 -- |
 sampleMSUGRA :: MSUGRAInput 
@@ -44,13 +48,15 @@ softpointCmd msugra
              "/home/wavewave/repo/workspace/haskellstudy/slow"
              "teststdout"
 
+cmd1 = CmdSet "ls" "/home/wavewave/repo/workspace/haskellstudy/slow" "teststdout"
 
+cmd2 = CmdSet "date" "/home/wavewave/repo/workspace/haskellstudy/slow" "teststdout2"
 
 
 test_tickingevent :: IO () 
 test_tickingevent = do 
     dref <- newEmptyMVar :: IO (MVar (Driver IO ()))
-    let logger = weblogger "http://127.0.0.1:7800"
+    let logger = simplelogger -- weblogger "http://127.0.0.1:7800"
     putMVar dref (driver logger world (eventHandler dref))
     putStrLn "starting ticking" 
     ticking dref 0    
@@ -86,10 +92,11 @@ ticking mvar n = do
            then eventHandler mvar Render
            else eventHandler mvar (Message ("test : " ++ show n)) -}
     let action 
-            | n `mod` 10 == 5 = eventHandler mvar 
-                                  (eventWrap (Start (softpointCmd sampleMSUGRA)))
+            | n == 10 = eventHandler mvar (eventWrap Init)
+            | n == 13 = eventHandler mvar (eventWrap (Start 0 (cmd1,cmd2)))
+
             --  | n `mod` 10 == 9 = eventHandler mvar (eventWrap (Init (n `div` 10)))
-            | otherwise = eventHandler mvar (eventWrap Render)
+            | otherwise = return () -- eventHandler mvar (eventWrap Render)
     action 
 
    

@@ -35,10 +35,17 @@ Library
 
   Other-Modules:   
   exposed-modules:
+                   CmdClient 
                    CmdExec
+                   Type.CmdExecEvent
+                   Type.CmdExec
+                   Type.CmdSet
+                   Type.SubOp 
+                   Type.WorldState 
+                   Util
                    WebLog
-                   Type
-
+                   World
+                 
 
  
 Executable cmdmanager

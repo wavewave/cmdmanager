@@ -28,7 +28,11 @@ import Control.Monad.Coroutine.Object
 import Control.Monad.Coroutine.Queue
 import Control.Monad.Coroutine.World
 -- from this package 
-import Type
+import Type.CmdExec
+import Type.CmdExecEvent
+import Type.CmdSet
+import Type.WorldState
+import Util
 -- 
 import Prelude hiding ((.),id)
 
@@ -36,102 +40,39 @@ import Prelude hiding ((.),id)
 doCmdAction :: Int -> CmdSet -> (Event -> IO ()) -> IO ()
 doCmdAction i cmdset@CmdSet {..}  handler = do 
     forkIO $ do setCurrentDirectory workdir
-                -- system (program cmdset)
                 (_mhin,Just hout,_mherr,h) <- createProcess (shell program) { std_out = CreatePipe }  
                 str <- hGetContents hout 
                 writeFile (workdir </> stdoutfile ) str 
                 handler (eventWrap (Finish i))
     return ()
 
--- fireEvent :: CmdExecEvent -> 
--- | 
-fireEvent :: (MonadState (WorldAttrib m1) m, Eventable e) => e -> m ()
-fireEvent ev = modify (worldState.bufQueue %~ enqueue wrappedev)
-  where wrappedev = Right (eventWrap ev)
 
--- | 
-fireAction :: (MonadState (WorldAttrib m1) m) => ((Event -> IO ()) -> IO ()) 
-           -> m ()
-fireAction action = modify (worldState.bufQueue %~ enqueue wrappedev)
-  where wrappedev = Left (ActionOrder action)
 
 -- | command executor actor
-cmdexec :: forall m. (Monad m) => 
-           CmdSet     -- ^ command set 
-        -> Int        -- ^ id 
-        -> ServerObj SubOp (StateT (WorldAttrib m) m) ()
-cmdexec cmdset idnum = ReaderT (workerW idnum None)  
+cmdexec :: forall m m1. (Monad m, MonadState (WorldAttrib m1) m) => 
+           Int -> ServerObj CmdOp m ()
+cmdexec i = initServer (go i None)  
   where 
-    workerW :: Int 
-            -> JobStatus 
-            -> MethodInput SubOp 
-            -> ServerT SubOp (StateT (WorldAttrib m) m) ()
-    workerW i jst (Input GiveEventSub ev) = do 
-      (r,jst') <- case ev of 
-          Init i' -> do 
+    go :: Int -> JobStatus CmdSet -> MethodInput CmdOp -> ServerT CmdOp m ()
+    go i _jst (Input CmdReady cset) = do 
+        req <- request (Output CmdReady ())
+        go i (Assigned cset) req 
+    go i (Assigned cset) (Input CmdInit ())  = do 
+        jst' <- fireAction (doCmdAction i cset)
+        req <- request (Output CmdInit ())
+        go i (Started cset) req 
+
+{-
+case ev of 
+          CmdReady -> do 
             if i == i' 
-              then do 
-                -- let action = Left . ActionOrder $ doCmdAction i cmdset 
-                -- modify (worldState.bufQueue %~ enqueue action)
-                fireAction (doCmdAction i cmdset)
-                return (True,Started)
               else return (False,jst)
           Finish i' -> do
             if i == i' then return (True,Ended) 
                        else return (False,jst)
-          Render -> do 
-            modify (worldState.bufLog %~ 
-                       (. (<> show i <> "th job status = " <> show jst <> "\n")))
-            return (True,jst)
           _ -> return (False,jst)
-
-      modify (worldState.jobMap.at i .~ Just jst')
       req <- if r then request (Output GiveEventSub ())
                   else request Ignore 
       workerW i jst' req 
-
+-}
           
--- | 
-world :: forall m. (MonadIO m) => ServerObj (WorldOp m) m () 
-world = ReaderT staction 
-  where 
-    staction req = do runStateT (go req) initWorld
-                      return ()
-    go :: (MonadIO m) => MethodInput (WorldOp m) -> StateT (WorldAttrib (ServerT (WorldOp m) m)) (ServerT (WorldOp m) m) () 
-    go (Input GiveEvent ev) = do
-      case getCmdExecEvent ev of  
-        Nothing -> return () 
-        Just e -> do wlst <- (^. worldActor.workers ) <$> get 
-                     case e of 
-                       Start cmdset -> do 
-                         i <- (^. worldState.nextID) <$> get 
-                         let wlst' = cmdexec cmdset i : wlst 
-                         modify (worldActor.workers .~ wlst')
-                         modify (worldState.nextID %~ (+1) )
-                         fireEvent (Init i)
-                       _ -> do  
-                         Right wlst' <- 
-                           runErrorT $ mapM (\x -> liftM fst (x <==> giveEventSub e)) wlst
-                         modify (worldActor.workers .~ wlst')
-      req <- lift (request (Output GiveEvent ()))
-      go req 
-
-    go (Input FlushLog (logobj :: LogServer m ())) = do
-      logf <- get >>= return . (^. worldState.bufLog )
-      let msg = logf "" 
-      if ((not . null) msg) 
-        then do 
-          let l1 = runErrorT (logobj <==> writeLog ("[World] " ++ (logf ""))) 
-          Right (logobj',_) <- lift . lift $ l1
-          modify (worldState.bufLog .~ id)
-          req <- lift (request (Output FlushLog logobj'))
-          go req  
-        else do 
-          req <- lift (request Ignore) 
-          go req 
-    go (Input FlushQueue ()) = do
-      q <- ( ^. worldState.bufQueue ) <$> get
-      let lst = fqueue q ++ reverse (bqueue q)
-      modify ( worldState.bufQueue .~ emptyQueue )
-      req <- lift (request (Output FlushQueue lst))
-      go req 
